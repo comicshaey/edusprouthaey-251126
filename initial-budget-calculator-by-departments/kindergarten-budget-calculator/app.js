@@ -1,11 +1,9 @@
-// 유치원 예산 계산기 JS
-// 숫자 -> 통화 포맷
-function kFmtMoney(v) {
-  if (isNaN(v) || !isFinite(v)) return "-";
-  return v.toLocaleString("ko-KR") + "원";
-}
+// 유치원 예산 계산기 (BudgetCore 사용)
 
 window.addEventListener("DOMContentLoaded", () => {
+  if (!window.BudgetCore) return;
+  const { fmtMoney, buildCategorySummaryHtml, bindClearAll } = window.BudgetCore;
+
   const tbody = document.querySelector("#kTable tbody");
   const addRowBtn = document.getElementById("kAddRowBtn");
   const clearRowsBtn = document.getElementById("kClearRowsBtn");
@@ -23,6 +21,11 @@ window.addEventListener("DOMContentLoaded", () => {
     { value: "교재", label: "교재·교구" },
     { value: "기타", label: "기타" }
   ];
+
+  function getChildCount() {
+    const v = Number(document.getElementById("kChildCount")?.value || 0);
+    return v > 0 ? v : 0;
+  }
 
   function createRow(defaultCat = "놀이") {
     const tr = document.createElement("tr");
@@ -101,11 +104,6 @@ window.addEventListener("DOMContentLoaded", () => {
     return tr;
   }
 
-  function getChildCount() {
-    const v = Number(document.getElementById("kChildCount")?.value || 0);
-    return v > 0 ? v : 0;
-  }
-
   function updateAll() {
     const rows = tbody.querySelectorAll("tr");
     const catSum = {};
@@ -117,15 +115,15 @@ window.addEventListener("DOMContentLoaded", () => {
       const cat = tr.querySelector(".k-cat")?.value || "기타";
       const unitVal = Number(tr.querySelector(".k-unit")?.value || 0);
       const timesVal = Number(tr.querySelector(".k-times")?.value || 0);
+      const amtTd = tr.querySelector(".k-amount");
 
       let amt = 0;
       if (childCount > 0 && unitVal > 0 && timesVal > 0) {
         amt = childCount * unitVal * timesVal;
       }
 
-      const amtTd = tr.querySelector(".k-amount");
       if (amt > 0) {
-        amtTd.textContent = kFmtMoney(amt);
+        amtTd.textContent = fmtMoney(amt);
         if (catSum[cat] == null) catSum[cat] = 0;
         catSum[cat] += amt;
         grandTotal += amt;
@@ -134,20 +132,10 @@ window.addEventListener("DOMContentLoaded", () => {
       }
     });
 
-    const lines = [];
-    lines.push(`<p><b>카테고리별 소계</b></p>`);
-    CATS.forEach(c => {
-      const sum = catSum[c.value];
-      if (sum > 0) {
-        lines.push(`<p>· ${c.label}: <b>${kFmtMoney(sum)}</b></p>`);
-      } else {
-        lines.push(`<p>· ${c.label}: 0원</p>`);
-      }
+    summaryBox.innerHTML = buildCategorySummaryHtml(CATS, catSum, grandTotal, {
+      title: "카테고리별 소계",
+      totalLabel: "총 소요 예산(유치원 교육활동)"
     });
-    lines.push(`<hr>`);
-    lines.push(`<p><b>총 소요 예산(유치원 교육활동)</b> = <b>${kFmtMoney(grandTotal)}</b></p>`);
-
-    summaryBox.innerHTML = lines.join("");
   }
 
   function makeNote() {
@@ -159,7 +147,6 @@ window.addEventListener("DOMContentLoaded", () => {
     const catSum = {};
     CATS.forEach(c => (catSum[c.value] = 0));
     let grandTotal = 0;
-
     const details = [];
 
     rows.forEach(tr => {
@@ -189,24 +176,22 @@ window.addEventListener("DOMContentLoaded", () => {
     const catLines = [];
     CATS.forEach(c => {
       const sum = catSum[c.value];
-      if (sum > 0) {
-        catLines.push(`${c.label} ${kFmtMoney(sum)}`);
-      }
+      if (sum > 0) catLines.push(`${c.label} ${fmtMoney(sum)}`);
     });
 
     const detailLines = details.map(d => {
       const label = CATS.find(c => c.value === d.cat)?.label || d.cat;
       const notePart = d.note ? `, 비고: ${d.note}` : "";
-      return `- [${label}] ${d.name}: 유아 ${childCount}명 × 1인당 ${kFmtMoney(d.unitVal)} × 연 ${d.timesVal}회 = ${kFmtMoney(d.amt)}${notePart}`;
+      return `- [${label}] ${d.name}: 유아 ${childCount}명 × 1인당 ${fmtMoney(
+        d.unitVal
+      )} × 연 ${d.timesVal}회 = ${fmtMoney(d.amt)}${notePart}`;
     });
 
-    const targetText =
-      className ? `(${className})` : "유치원 전체";
-
+    const targetText = className ? `(${className})` : "유치원 전체";
     const html = `
       <p>
         ${year || ""}학년도 유치원 교육활동 운영을 위하여, ${targetText} 유아 ${childCount}명을 기준으로
-        놀이·체험·행사·간식·교재교구 예산으로 총 <b>${kFmtMoney(grandTotal)}</b>을 편성하고자 합니다.
+        놀이·체험·행사·간식·교재교구 예산으로 총 <b>${fmtMoney(grandTotal)}</b>을 편성하고자 합니다.
       </p>
       <p>
         카테고리별 소요액은 다음과 같습니다.<br>
@@ -237,11 +222,7 @@ window.addEventListener("DOMContentLoaded", () => {
     updateAll();
   });
 
-  clearRowsBtn?.addEventListener("click", () => {
-    if (!confirm("모든 행을 삭제하시겠습니까?")) return;
-    initRows();
-  });
-
+  bindClearAll(clearRowsBtn, initRows, "모든 행을 삭제하시겠습니까?");
   makeNoteBtn?.addEventListener("click", makeNote);
 
   initRows();

@@ -1,11 +1,9 @@
-// 교육행정실 예산 계산기
-
-function aoFmtMoney(v) {
-  if (isNaN(v) || !isFinite(v)) return "-";
-  return v.toLocaleString("ko-KR") + "원";
-}
+// 교육행정실 예산 계산기 (BudgetCore 사용)
 
 window.addEventListener("DOMContentLoaded", () => {
+  if (!window.BudgetCore) return;
+  const { fmtMoney, buildCategorySummaryHtml, bindClearAll } = window.BudgetCore;
+
   const tbody = document.querySelector("#aoTable tbody");
   const addRowBtn = document.getElementById("aoAddRowBtn");
   const clearRowsBtn = document.getElementById("aoClearRowsBtn");
@@ -113,7 +111,7 @@ window.addEventListener("DOMContentLoaded", () => {
 
       const amt = unitVal * qtyVal;
       if (amt > 0) {
-        amtTd.textContent = aoFmtMoney(amt);
+        amtTd.textContent = fmtMoney(amt);
         if (catSum[cat] == null) catSum[cat] = 0;
         catSum[cat] += amt;
         grandTotal += amt;
@@ -122,17 +120,10 @@ window.addEventListener("DOMContentLoaded", () => {
       }
     });
 
-    const lines = [];
-    lines.push(`<p><b>카테고리별 소계</b></p>`);
-    CATS.forEach(c => {
-      const sum = catSum[c.value];
-      if (sum > 0) lines.push(`<p>· ${c.label}: <b>${aoFmtMoney(sum)}</b></p>`);
-      else lines.push(`<p>· ${c.label}: 0원</p>`);
+    summaryBox.innerHTML = buildCategorySummaryHtml(CATS, catSum, grandTotal, {
+      title: "카테고리별 소계",
+      totalLabel: "총 소요 예산(교육행정실)"
     });
-    lines.push("<hr>");
-    lines.push(`<p><b>총 소요 예산(교육행정실)</b> = <b>${aoFmtMoney(grandTotal)}</b></p>`);
-
-    summaryBox.innerHTML = lines.join("");
   }
 
   function makeNote() {
@@ -170,13 +161,15 @@ window.addEventListener("DOMContentLoaded", () => {
     const catLines = [];
     CATS.forEach(c => {
       const sum = catSum[c.value];
-      if (sum > 0) catLines.push(`${c.label} ${aoFmtMoney(sum)}`);
+      if (sum > 0) catLines.push(`${c.label} ${fmtMoney(sum)}`);
     });
 
     const detailLines = details.map(d => {
       const label = CATS.find(c => c.value === d.cat)?.label || d.cat;
       const notePart = d.note ? `, 비고: ${d.note}` : "";
-      return `- [${label}] ${d.name}: 단가 ${aoFmtMoney(d.unitVal)} × ${d.qtyVal} = ${aoFmtMoney(d.amt)}${notePart}`;
+      return `- [${label}] ${d.name}: 단가 ${fmtMoney(
+        d.unitVal
+      )} × ${d.qtyVal} = ${fmtMoney(d.amt)}${notePart}`;
     });
 
     const writerTxt = writer ? ` (${writer} 작성)` : "";
@@ -185,7 +178,7 @@ window.addEventListener("DOMContentLoaded", () => {
       <p>
         ${year || ""}학년도 학교행정 운영을 위하여,
         사무용품·OA장비 소모품·시설 경미수선비 등 교육행정실 예산으로
-        총 <b>${aoFmtMoney(grandTotal)}</b>을 편성하고자 합니다.${writerTxt}
+        총 <b>${fmtMoney(grandTotal)}</b>을 편성하고자 합니다.${writerTxt}
       </p>
       <p>
         카테고리별 소요액은 다음과 같습니다.<br>
@@ -215,11 +208,7 @@ window.addEventListener("DOMContentLoaded", () => {
     updateAll();
   });
 
-  clearRowsBtn?.addEventListener("click", () => {
-    if (!confirm("모든 행을 삭제하시겠습니까?")) return;
-    initRows();
-  });
-
+  bindClearAll(clearRowsBtn, initRows, "모든 행을 삭제하시겠습니까?");
   makeNoteBtn?.addEventListener("click", makeNote);
 
   initRows();

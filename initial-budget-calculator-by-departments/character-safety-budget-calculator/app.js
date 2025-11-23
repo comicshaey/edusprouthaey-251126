@@ -1,11 +1,9 @@
-// 인성·안전부 예산 계산기 JS
-
-function csFmtMoney(v) {
-  if (isNaN(v) || !isFinite(v)) return "-";
-  return v.toLocaleString("ko-KR") + "원";
-}
+// 인성·안전부 예산 계산기 (BudgetCore 사용)
 
 window.addEventListener("DOMContentLoaded", () => {
+  if (!window.BudgetCore) return;
+  const { fmtMoney, buildCategorySummaryHtml, bindClearAll } = window.BudgetCore;
+
   const tbody = document.querySelector("#csTable tbody");
   const addRowBtn = document.getElementById("csAddRowBtn");
   const clearRowsBtn = document.getElementById("csClearRowsBtn");
@@ -23,7 +21,6 @@ window.addEventListener("DOMContentLoaded", () => {
     { value: "기타", label: "기타" }
   ];
 
-  // 기준: perStudent(1인당), perItem(개별물품)
   const BASE_OPTIONS = [
     { value: "perStudent", label: "학생 수 기준(1인당)" },
     { value: "perItem", label: "개별 물품 기준(개수)" }
@@ -141,18 +138,16 @@ window.addEventListener("DOMContentLoaded", () => {
       let amt = 0;
       if (unitVal > 0 && timesVal > 0) {
         if (base === "perStudent") {
-          // 학생 수 × 1인당 단가 × 횟수
           if (studentCount > 0) {
             amt = studentCount * unitVal * timesVal;
           }
         } else {
-          // 개별 물품 기준: 단가 × 수량
           amt = unitVal * timesVal;
         }
       }
 
       if (amt > 0) {
-        amtTd.textContent = csFmtMoney(amt);
+        amtTd.textContent = fmtMoney(amt);
         if (catSum[cat] == null) catSum[cat] = 0;
         catSum[cat] += amt;
         grandTotal += amt;
@@ -161,20 +156,10 @@ window.addEventListener("DOMContentLoaded", () => {
       }
     });
 
-    const lines = [];
-    lines.push(`<p><b>카테고리별 소계</b></p>`);
-    CATS.forEach(c => {
-      const sum = catSum[c.value];
-      if (sum > 0) {
-        lines.push(`<p>· ${c.label}: <b>${csFmtMoney(sum)}</b></p>`);
-      } else {
-        lines.push(`<p>· ${c.label}: 0원</p>`);
-      }
+    summaryBox.innerHTML = buildCategorySummaryHtml(CATS, catSum, grandTotal, {
+      title: "카테고리별 소계",
+      totalLabel: "총 소요 예산(인성·안전부)"
     });
-    lines.push(`<hr>`);
-    lines.push(`<p><b>총 소요 예산(인성·안전 관련)</b> = <b>${csFmtMoney(grandTotal)}</b></p>`);
-
-    summaryBox.innerHTML = lines.join("");
   }
 
   function makeNote() {
@@ -186,7 +171,6 @@ window.addEventListener("DOMContentLoaded", () => {
     const catSum = {};
     CATS.forEach(c => (catSum[c.value] = 0));
     let grandTotal = 0;
-
     const details = [];
 
     rows.forEach(tr => {
@@ -205,10 +189,12 @@ window.addEventListener("DOMContentLoaded", () => {
       if (base === "perStudent") {
         if (studentCount <= 0) return;
         amt = studentCount * unitVal * timesVal;
-        formulaText = `학생 ${studentCount}명 × 1인당 ${csFmtMoney(unitVal)} × ${timesVal}회`;
+        formulaText = `학생 ${studentCount}명 × 1인당 ${fmtMoney(
+          unitVal
+        )} × ${timesVal}회`;
       } else {
         amt = unitVal * timesVal;
-        formulaText = `${timesVal}개 × ${csFmtMoney(unitVal)}`;
+        formulaText = `${timesVal}개 × ${fmtMoney(unitVal)}`;
       }
 
       if (amt <= 0) return;
@@ -227,22 +213,22 @@ window.addEventListener("DOMContentLoaded", () => {
     });
 
     if (details.length === 0) {
-      noteBox.innerHTML = `<p class="muted">입력된 유효 항목이 없어 설명문을 생성할 수 없습니다. 학생 수, 단가, 기준값을 다시 확인해 주세요.</p>`;
+      noteBox.innerHTML = `<p class="muted">입력된 유효 항목이 없어 설명문을 생성할 수 없습니다.</p>`;
       return;
     }
 
     const catLines = [];
     CATS.forEach(c => {
       const sum = catSum[c.value];
-      if (sum > 0) {
-        catLines.push(`${c.label} ${csFmtMoney(sum)}`);
-      }
+      if (sum > 0) catLines.push(`${c.label} ${fmtMoney(sum)}`);
     });
 
     const detailLines = details.map(d => {
       const label = CATS.find(c => c.value === d.cat)?.label || d.cat;
       const notePart = d.note ? `, 비고: ${d.note}` : "";
-      return `- [${label}] ${d.name}: ${d.formulaText} = ${csFmtMoney(d.amt)}${notePart}`;
+      return `- [${label}] ${d.name}: ${d.formulaText} = ${fmtMoney(
+        d.amt
+      )}${notePart}`;
     });
 
     const writerTxt = writer ? ` (${writer} 작성)` : "";
@@ -250,7 +236,7 @@ window.addEventListener("DOMContentLoaded", () => {
     const html = `
       <p>
         ${year || ""}학년도 인성·안전 교육(인성교육, 학교폭력 예방, 안전체험·캠페인 등) 운영을 위하여,
-        관련 물품·홍보자료·체험활동비로 총 <b>${csFmtMoney(grandTotal)}</b>을 편성하고자 합니다.${writerTxt}
+        관련 물품·홍보자료·체험활동비로 총 <b>${fmtMoney(grandTotal)}</b>을 편성하고자 합니다.${writerTxt}
       </p>
       <p>
         카테고리별 소요액은 다음과 같습니다.<br>
@@ -281,11 +267,7 @@ window.addEventListener("DOMContentLoaded", () => {
     updateAll();
   });
 
-  clearRowsBtn?.addEventListener("click", () => {
-    if (!confirm("모든 행을 삭제하시겠습니까?")) return;
-    initRows();
-  });
-
+  bindClearAll(clearRowsBtn, initRows, "모든 행을 삭제하시겠습니까?");
   makeNoteBtn?.addEventListener("click", makeNote);
 
   initRows();

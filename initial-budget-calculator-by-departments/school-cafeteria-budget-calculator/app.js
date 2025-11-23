@@ -1,59 +1,81 @@
-// /initial-budget-calculator-by-departments/school-cafeteria-budget-calculator/app.js
-
-// 숫자를 통화 형식으로
-function cafFmtMoney(v) {
-  if (isNaN(v) || !isFinite(v)) return "-";
-  return v.toLocaleString("ko-KR") + "원";
-}
+// 급식실 예산 계산기 (BudgetCore 사용)
 
 window.addEventListener("DOMContentLoaded", () => {
-  const tableBody = document.querySelector("#itemTable tbody");
-  const addRowBtn = document.getElementById("addRowBtn");
-  const clearRowsBtn = document.getElementById("clearRowsBtn");
-  const summaryBox = document.getElementById("summaryBox");
-  const makeNoteBtn = document.getElementById("makeNoteBtn");
-  const noteBox = document.getElementById("noteBox");
+  if (!window.BudgetCore) return;
+  const { fmtMoney, buildCategorySummaryHtml, bindClearAll } = window.BudgetCore;
 
-  if (!tableBody) return;
+  const tbody = document.querySelector("#cfTable tbody");
+  const addRowBtn = document.getElementById("cfAddRowBtn");
+  const clearRowsBtn = document.getElementById("cfClearRowsBtn");
+  const summaryBox = document.getElementById("cfSummaryBox");
+  const makeNoteBtn = document.getElementById("cfMakeNoteBtn");
+  const noteBox = document.getElementById("cfNoteBox");
 
-  // 기본 카테고리 목록
-  const CATEGORY_OPTIONS = [
-    { value: "위생소독", label: "위생·소독" },
-    { value: "조리도구", label: "조리도구·소모품" },
-    { value: "기구수선", label: "기구 교체·수선" },
+  if (!tbody) return;
+
+  const CATS = [
+    { value: "식품비", label: "식품비(1식당 단가)" },
+    { value: "부식소모품", label: "부식·소모품" },
+    { value: "기구장비", label: "기구·장비" },
+    { value: "위생안전", label: "위생·안전" },
     { value: "기타", label: "기타" }
   ];
 
-  // 행 생성 함수
-  function createRow(defaultCategory = "위생소독") {
+  const BASE_OPTIONS = [
+    { value: "perMeal", label: "학생수×급식일수×1식단가" },
+    { value: "perItem", label: "단순 물품(단가×수량)" }
+  ];
+
+  function getStudentCount() {
+    const v = Number(document.getElementById("cfStudentCount")?.value || 0);
+    return v > 0 ? v : 0;
+  }
+
+  function getMealDays() {
+    const v = Number(document.getElementById("cfMealDays")?.value || 0);
+    return v > 0 ? v : 0;
+  }
+
+  function createRow(defaultCat = "식품비") {
     const tr = document.createElement("tr");
 
-    const categoryTd = document.createElement("td");
-    const select = document.createElement("select");
-    select.className = "caf-input caf-category";
-    CATEGORY_OPTIONS.forEach(opt => {
+    const catTd = document.createElement("td");
+    const catSel = document.createElement("select");
+    catSel.className = "cf-cat";
+    CATS.forEach(c => {
       const o = document.createElement("option");
-      o.value = opt.value;
-      o.textContent = opt.label;
-      if (opt.value === defaultCategory) o.selected = true;
-      select.appendChild(o);
+      o.value = c.value;
+      o.textContent = c.label;
+      if (c.value === defaultCat) o.selected = true;
+      catSel.appendChild(o);
     });
-    categoryTd.appendChild(select);
+    catTd.appendChild(catSel);
 
     const nameTd = document.createElement("td");
     const nameInput = document.createElement("input");
     nameInput.type = "text";
-    nameInput.placeholder = "예: 위생복, 위생장갑, 소독제 등";
-    nameInput.className = "caf-input caf-name";
+    nameInput.className = "cf-name";
+    nameInput.placeholder = "예: 식품비, 일회용품, 조리기구, 위생점검비 등";
     nameTd.appendChild(nameInput);
+
+    const baseTd = document.createElement("td");
+    const baseSel = document.createElement("select");
+    baseSel.className = "cf-base";
+    BASE_OPTIONS.forEach(oInfo => {
+      const o = document.createElement("option");
+      o.value = oInfo.value;
+      o.textContent = oInfo.label;
+      baseSel.appendChild(o);
+    });
+    baseTd.appendChild(baseSel);
 
     const unitTd = document.createElement("td");
     const unitInput = document.createElement("input");
     unitInput.type = "number";
     unitInput.min = "0";
-    unitInput.step = "100";
-    unitInput.className = "caf-input caf-unit";
-    unitInput.placeholder = "단가";
+    unitInput.step = "10";
+    unitInput.className = "cf-unit";
+    unitInput.placeholder = "1식 단가 또는 물품 단가";
     unitTd.appendChild(unitInput);
 
     const qtyTd = document.createElement("td");
@@ -61,18 +83,18 @@ window.addEventListener("DOMContentLoaded", () => {
     qtyInput.type = "number";
     qtyInput.min = "0";
     qtyInput.step = "1";
-    qtyInput.className = "caf-input caf-qty";
-    qtyInput.placeholder = "수량";
+    qtyInput.className = "cf-qty";
+    qtyInput.placeholder = "물품 수량(식품비는 1 권장)";
     qtyTd.appendChild(qtyInput);
 
-    const amountTd = document.createElement("td");
-    amountTd.className = "caf-amount";
-    amountTd.textContent = "-";
+    const amtTd = document.createElement("td");
+    amtTd.className = "cf-amount";
+    amtTd.textContent = "-";
 
     const noteTd = document.createElement("td");
     const noteInput = document.createElement("input");
     noteInput.type = "text";
-    noteInput.className = "caf-input caf-note";
+    noteInput.className = "cf-note";
     noteInput.placeholder = "비고";
     noteTd.appendChild(noteInput);
 
@@ -83,18 +105,19 @@ window.addEventListener("DOMContentLoaded", () => {
     delBtn.className = "btn-ghost-small";
     delTd.appendChild(delBtn);
 
-    tr.appendChild(categoryTd);
+    tr.appendChild(catTd);
     tr.appendChild(nameTd);
+    tr.appendChild(baseTd);
     tr.appendChild(unitTd);
     tr.appendChild(qtyTd);
-    tr.appendChild(amountTd);
+    tr.appendChild(amtTd);
     tr.appendChild(noteTd);
     tr.appendChild(delTd);
 
-    // 이벤트 연결
     unitInput.addEventListener("input", updateAll);
     qtyInput.addEventListener("input", updateAll);
-    select.addEventListener("change", updateAll);
+    baseSel.addEventListener("change", updateAll);
+    catSel.addEventListener("change", updateAll);
     delBtn.addEventListener("click", () => {
       tr.remove();
       updateAll();
@@ -103,167 +126,155 @@ window.addEventListener("DOMContentLoaded", () => {
     return tr;
   }
 
-  // 요약/합계 다시 계산
   function updateAll() {
-    const rows = tableBody.querySelectorAll("tr");
-
-    // 카테고리별 합계 저장용
-    const categorySum = {};
-    const categoryLabelMap = {};
-    CATEGORY_OPTIONS.forEach(opt => {
-      categorySum[opt.value] = 0;
-      categoryLabelMap[opt.value] = opt.label;
-    });
-
+    const rows = tbody.querySelectorAll("tr");
+    const catSum = {};
+    CATS.forEach(c => (catSum[c.value] = 0));
     let grandTotal = 0;
 
+    const studentCount = getStudentCount();
+    const mealDays = getMealDays();
+
     rows.forEach(tr => {
-      const category = tr.querySelector(".caf-category")?.value || "기타";
-      const unitVal = Number(tr.querySelector(".caf-unit")?.value || 0);
-      const qtyVal = Number(tr.querySelector(".caf-qty")?.value || 0);
-      const amount = unitVal * qtyVal;
+      const cat = tr.querySelector(".cf-cat")?.value || "기타";
+      const base = tr.querySelector(".cf-base")?.value || "perMeal";
+      const unitVal = Number(tr.querySelector(".cf-unit")?.value || 0);
+      const qtyVal = Number(tr.querySelector(".cf-qty")?.value || 0);
+      const amtTd = tr.querySelector(".cf-amount");
 
-      const amountTd = tr.querySelector(".caf-amount");
-      if (amount > 0) {
-        amountTd.textContent = cafFmtMoney(amount);
-      } else {
-        amountTd.textContent = "-";
+      let amt = 0;
+
+      if (unitVal > 0) {
+        if (base === "perMeal") {
+          if (studentCount > 0 && mealDays > 0) {
+            // 학생수 × 급식일수 × 1식 단가
+            amt = studentCount * mealDays * unitVal;
+          }
+        } else {
+          // 단순 물품
+          if (qtyVal > 0) amt = unitVal * qtyVal;
+        }
       }
 
-      if (!isNaN(amount) && amount > 0) {
-        if (categorySum[category] == null) categorySum[category] = 0;
-        categorySum[category] += amount;
-        grandTotal += amount;
+      if (amt > 0) {
+        amtTd.textContent = fmtMoney(amt);
+        if (catSum[cat] == null) catSum[cat] = 0;
+        catSum[cat] += amt;
+        grandTotal += amt;
+      } else {
+        amtTd.textContent = "-";
       }
     });
 
-    // summaryBox 내용 갱신
-    const lines = [];
-    lines.push(`<p><b>카테고리별 소계</b></p>`);
-
-    CATEGORY_OPTIONS.forEach(opt => {
-      const sum = categorySum[opt.value];
-      if (sum > 0) {
-        lines.push(`<p>· ${opt.label}: <b>${cafFmtMoney(sum)}</b></p>`);
-      } else {
-        lines.push(`<p>· ${opt.label}: 0원</p>`);
-      }
+    summaryBox.innerHTML = buildCategorySummaryHtml(CATS, catSum, grandTotal, {
+      title: "카테고리별 소계",
+      totalLabel: "총 소요 예산(급식실)"
     });
-
-    lines.push(`<hr>`);
-    lines.push(`<p><b>총 소요 예산(비식품, 급식실 운영 관련)</b> = <b>${cafFmtMoney(grandTotal)}</b></p>`);
-
-    summaryBox.innerHTML = lines.join("");
   }
 
-  // 설명문 생성
   function makeNote() {
-    const year = document.getElementById("year")?.value || "";
-    const writer = document.getElementById("writer")?.value || "";
+    const year = document.getElementById("cfYear")?.value || "";
+    const writer = (document.getElementById("cfWriter")?.value || "").trim();
+    const studentCount = getStudentCount();
+    const mealDays = getMealDays();
 
-    const rows = tableBody.querySelectorAll("tr");
-    const categorySum = {};
-    const detailItems = [];
-
-    CATEGORY_OPTIONS.forEach(opt => {
-      categorySum[opt.value] = 0;
-    });
-
+    const rows = tbody.querySelectorAll("tr");
+    const catSum = {};
+    CATS.forEach(c => (catSum[c.value] = 0));
     let grandTotal = 0;
+    const details = [];
 
     rows.forEach(tr => {
-      const category = tr.querySelector(".caf-category")?.value || "기타";
-      const name = (tr.querySelector(".caf-name")?.value || "").trim();
-      const unitVal = Number(tr.querySelector(".caf-unit")?.value || 0);
-      const qtyVal = Number(tr.querySelector(".caf-qty")?.value || 0);
-      const note = (tr.querySelector(".caf-note")?.value || "").trim();
-      const amount = unitVal * qtyVal;
+      const cat = tr.querySelector(".cf-cat")?.value || "기타";
+      const base = tr.querySelector(".cf-base")?.value || "perMeal";
+      const name = (tr.querySelector(".cf-name")?.value || "").trim();
+      const unitVal = Number(tr.querySelector(".cf-unit")?.value || 0);
+      const qtyVal = Number(tr.querySelector(".cf-qty")?.value || 0);
+      const note = (tr.querySelector(".cf-note")?.value || "").trim();
 
-      if (!name || amount <= 0) return;
+      if (!name || unitVal <= 0) return;
 
-      if (categorySum[category] == null) categorySum[category] = 0;
-      categorySum[category] += amount;
-      grandTotal += amount;
+      let amt = 0;
+      let formulaText = "";
 
-      detailItems.push({
-        category,
-        name,
-        unitVal,
-        qtyVal,
-        amount,
-        note
-      });
+      if (base === "perMeal") {
+        if (studentCount <= 0 || mealDays <= 0) return;
+        amt = studentCount * mealDays * unitVal;
+        formulaText = `학생 ${studentCount}명 × 급식일수 ${mealDays}일 × 1식 ${fmtMoney(
+          unitVal
+        )}`;
+      } else {
+        if (qtyVal <= 0) return;
+        amt = unitVal * qtyVal;
+        formulaText = `${qtyVal}개 × ${fmtMoney(unitVal)}`;
+      }
+
+      if (amt <= 0) return;
+
+      if (catSum[cat] == null) catSum[cat] = 0;
+      catSum[cat] += amt;
+      grandTotal += amt;
+
+      details.push({ cat, name, formulaText, amt, note });
     });
 
-    if (detailItems.length === 0) {
-      noteBox.innerHTML = `<p class="muted">입력된 항목이 없어 설명문을 생성할 수 없습니다. 표에 항목을 추가해 주세요.</p>`;
+    if (details.length === 0) {
+      noteBox.innerHTML = `<p class="muted">입력된 항목이 없어 설명문을 생성할 수 없습니다.</p>`;
       return;
     }
 
-    // 카테고리별 요약 문장
     const catLines = [];
-    CATEGORY_OPTIONS.forEach(opt => {
-      const sum = categorySum[opt.value];
-      if (sum > 0) {
-        catLines.push(`${opt.label} ${cafFmtMoney(sum)}`);
-      }
+    CATS.forEach(c => {
+      const sum = catSum[c.value];
+      if (sum > 0) catLines.push(`${c.label} ${fmtMoney(sum)}`);
     });
 
-    const catSummaryText = catLines.join(", ");
-
-    // 디테일 리스트: 항목 3~4개 정도까지는 그냥 다 보여줘도 됨
-    const detailLines = detailItems.map(item => {
-      const catLabel = CATEGORY_OPTIONS.find(o => o.value === item.category)?.label || item.category;
-      const notePart = item.note ? `, 비고: ${item.note}` : "";
-      return `- [${catLabel}] ${item.name}: 단가 ${cafFmtMoney(item.unitVal)} × ${item.qtyVal} = ${cafFmtMoney(item.amount)}${notePart}`;
+    const detailLines = details.map(d => {
+      const label = CATS.find(c => c.value === d.cat)?.label || d.cat;
+      const notePart = d.note ? `, 비고: ${d.note}` : "";
+      return `- [${label}] ${d.name}: ${d.formulaText} = ${fmtMoney(
+        d.amt
+      )}${notePart}`;
     });
 
-    const writerText = writer ? `(${writer} 작성)` : "";
+    const writerTxt = writer ? ` (${writer} 작성)` : "";
 
     const html = `
       <p>
-        ${year || ""}학년도 학교급식 운영을 위하여, 위생·소독·조리도구·기구수선 등 비식품 항목으로
-        총 <b>${cafFmtMoney(grandTotal)}</b>을 편성하고자 합니다.${writerText}
+        ${year || ""}학년도 학교급식 운영을 위하여,
+        식품비 및 부식·소모품·기구장비·위생안전 확보를 위한 예산으로
+        총 <b>${fmtMoney(grandTotal)}</b>을 편성하고자 합니다.${writerTxt}
       </p>
       <p>
         카테고리별 소요액은 다음과 같습니다.<br>
-        ${catSummaryText || "※ 카테고리별 합계 없음"}
+        ${catLines.join(", ") || "※ 카테고리별 합계 없음"}
       </p>
-      <p>
-        세부 산출 내역은 아래와 같으며, 필요 시 첨부표로 제출합니다.
-      </p>
+      <p>세부 산출 내역은 아래와 같으며, 필요 시 첨부표로 제출합니다.</p>
       <div style="margin-top:8px;">
         ${detailLines.map(l => `<p>${l}</p>`).join("")}
       </div>
       <p class="muted" style="margin-top:8px;">
-        ※ 위 금액은 연간 급식 운영계획 및 위생·안전 관리 계획에 따른 최소 소요액을 기준으로 산정한 것입니다.
+        ※ 위 금액은 급식기본계획 상 급식일수 및 학생 수를 기준으로 산정한 최소 소요액입니다.
       </p>
     `;
-
     noteBox.innerHTML = html;
   }
 
-  // 초기 행 몇 개 깔아두기
   function initRows() {
-    tableBody.innerHTML = "";
-    tableBody.appendChild(createRow("위생소독"));
-    tableBody.appendChild(createRow("조리도구"));
-    tableBody.appendChild(createRow("기구수선"));
+    tbody.innerHTML = "";
+    tbody.appendChild(createRow("식품비"));
+    tbody.appendChild(createRow("부식소모품"));
+    tbody.appendChild(createRow("위생안전"));
     updateAll();
   }
 
   addRowBtn?.addEventListener("click", () => {
-    tableBody.appendChild(createRow());
+    tbody.appendChild(createRow());
     updateAll();
   });
 
-  clearRowsBtn?.addEventListener("click", () => {
-    if (!confirm("모든 행을 삭제하시겠습니까?")) return;
-    initRows();
-  });
-
+  bindClearAll(clearRowsBtn, initRows, "모든 행을 삭제하시겠습니까?");
   makeNoteBtn?.addEventListener("click", makeNote);
 
-  // 최초 초기화
   initRows();
 });

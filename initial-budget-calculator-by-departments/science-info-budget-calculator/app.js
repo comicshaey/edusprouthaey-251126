@@ -1,11 +1,9 @@
-// 과학정보부 예산 계산기
-
-function siFmtMoney(v) {
-  if (isNaN(v) || !isFinite(v)) return "-";
-  return v.toLocaleString("ko-KR") + "원";
-}
+// 과학정보부 예산 계산기 (BudgetCore 사용)
 
 window.addEventListener("DOMContentLoaded", () => {
+  if (!window.BudgetCore) return;
+  const { fmtMoney, buildCategorySummaryHtml, bindClearAll } = window.BudgetCore;
+
   const tbody = document.querySelector("#siTable tbody");
   const addRowBtn = document.getElementById("siAddRowBtn");
   const clearRowsBtn = document.getElementById("siClearRowsBtn");
@@ -114,7 +112,7 @@ window.addEventListener("DOMContentLoaded", () => {
 
       const amt = unitVal * qtyVal;
       if (amt > 0) {
-        amtTd.textContent = siFmtMoney(amt);
+        amtTd.textContent = fmtMoney(amt);
         if (catSum[cat] == null) catSum[cat] = 0;
         catSum[cat] += amt;
         grandTotal += amt;
@@ -123,20 +121,10 @@ window.addEventListener("DOMContentLoaded", () => {
       }
     });
 
-    const lines = [];
-    lines.push(`<p><b>카테고리별 소계</b></p>`);
-    CATS.forEach(c => {
-      const sum = catSum[c.value];
-      if (sum > 0) {
-        lines.push(`<p>· ${c.label}: <b>${siFmtMoney(sum)}</b></p>`);
-      } else {
-        lines.push(`<p>· ${c.label}: 0원</p>`);
-      }
+    summaryBox.innerHTML = buildCategorySummaryHtml(CATS, catSum, grandTotal, {
+      title: "카테고리별 소계",
+      totalLabel: "총 소요 예산(과학정보부)"
     });
-    lines.push("<hr>");
-    lines.push(`<p><b>총 소요 예산(과학정보부)</b> = <b>${siFmtMoney(grandTotal)}</b></p>`);
-
-    summaryBox.innerHTML = lines.join("");
   }
 
   function makeNote() {
@@ -181,13 +169,15 @@ window.addEventListener("DOMContentLoaded", () => {
     const catLines = [];
     CATS.forEach(c => {
       const sum = catSum[c.value];
-      if (sum > 0) catLines.push(`${c.label} ${siFmtMoney(sum)}`);
+      if (sum > 0) catLines.push(`${c.label} ${fmtMoney(sum)}`);
     });
 
     const detailLines = details.map(d => {
       const label = CATS.find(c => c.value === d.cat)?.label || d.cat;
       const notePart = d.note ? `, 비고: ${d.note}` : "";
-      return `- [${label}] ${d.name}: 단가 ${siFmtMoney(d.unitVal)} × ${d.qtyVal} = ${siFmtMoney(d.amt)}${notePart}`;
+      return `- [${label}] ${d.name}: 단가 ${fmtMoney(
+        d.unitVal
+      )} × ${d.qtyVal} = ${fmtMoney(d.amt)}${notePart}`;
     });
 
     const writerTxt = writer ? ` (${writer} 작성)` : "";
@@ -196,7 +186,7 @@ window.addEventListener("DOMContentLoaded", () => {
       <p>
         ${year || ""}학년도 과학·정보 교육환경 유지를 위하여,
         실험소모품·실험기구·정보화장비·소프트웨어 라이선스 구입비 등으로
-        총 <b>${siFmtMoney(grandTotal)}</b>을 편성하고자 합니다.${writerTxt}
+        총 <b>${fmtMoney(grandTotal)}</b>을 편성하고자 합니다.${writerTxt}
       </p>
       <p>
         카테고리별 소요액은 다음과 같습니다.<br>
@@ -226,11 +216,7 @@ window.addEventListener("DOMContentLoaded", () => {
     updateAll();
   });
 
-  clearRowsBtn?.addEventListener("click", () => {
-    if (!confirm("모든 행을 삭제하시겠습니까?")) return;
-    initRows();
-  });
-
+  bindClearAll(clearRowsBtn, initRows, "모든 행을 삭제하시겠습니까?");
   makeNoteBtn?.addEventListener("click", makeNote);
 
   initRows();

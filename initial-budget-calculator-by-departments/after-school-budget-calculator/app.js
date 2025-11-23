@@ -1,200 +1,383 @@
-// /initial-budget-calculator-by-departments/after-school-budget-calculator/app.js
-
-// 간단한 숫자 -> 통화 포맷 헬퍼
-function fmtMoney(v) {
-  if (isNaN(v) || !isFinite(v)) return "-";
-  return v.toLocaleString("ko-KR") + "원";
-}
-
-// 소수 둘째 자리까지 고정
-function fmtPercent(v) {
-  if (isNaN(v) || !isFinite(v)) return "-";
-  return v.toFixed(2) + "%";
-}
+// 늘봄·방과후 프로그램 예산 계산기 (BudgetCore 사용)
+// - 강좌별 인건비 + 기관부담 사회보험률 반영
 
 window.addEventListener("DOMContentLoaded", () => {
-  const form = document.getElementById("afterSchoolForm");
-  const resultBox = document.getElementById("resultBox");
-  const resetBtn = document.getElementById("resetBtn");
+  if (!window.BudgetCore) return;
+  const { fmtMoney, buildCategorySummaryHtml, bindClearAll } = window.BudgetCore;
 
-  if (!form || !resultBox) return;
+  const tbody = document.querySelector("#asTable tbody");
+  const addRowBtn = document.getElementById("asAddRowBtn");
+  const clearRowsBtn = document.getElementById("asClearRowsBtn");
+  const summaryBox = document.getElementById("asSummaryBox");
+  const makeNoteBtn = document.getElementById("asMakeNoteBtn");
+  const noteBox = document.getElementById("asNoteBox");
 
-  resetBtn?.addEventListener("click", () => {
-    form.reset();
-    resultBox.innerHTML = `<p class="muted">입력값을 초기화했습니다. 다시 값을 넣고 "예산 소요액 계산하기"를 눌러주세요.</p>`;
-  });
+  if (!tbody) return;
 
-  form.addEventListener("submit", (e) => {
-    e.preventDefault();
+  // 선택형/맞춤형/돌봄 프로그램 구분 정도만
+  const CATS = [
+    { value: "선택형유료", label: "선택형 교육(유료)" },
+    { value: "선택형무료", label: "선택형 교육(무료)" },
+    { value: "맞춤형교육", label: "맞춤형 교육" },
+    { value: "선택형돌봄", label: "선택형 돌봄" },
+    { value: "기타", label: "기타" }
+  ];
 
-    // 1. 기본 값 읽기
-    const programType = document.getElementById("programType").value;
-    const teacherType = document.getElementById("teacherType").value;
+  function getYear() {
+    return document.getElementById("asYear")?.value || "";
+  }
 
-    const monthStart = Number(document.getElementById("monthStart").value);
-    const monthEnd = Number(document.getElementById("monthEnd").value);
-    const weeksPerMonth = Number(document.getElementById("weeksPerMonth").value);
+  function getOrgRate() {
+    // 기관부담 사회보험률(%) 입력값
+    const v = Number(document.getElementById("asOrgRate")?.value || 0);
+    return v > 0 ? v : 0;
+  }
 
-    const sessionsPerWeek = Number(document.getElementById("sessionsPerWeek").value);
-    const hoursPerSession = Number(document.getElementById("hoursPerSession").value);
-    const hourlyRate = Number(document.getElementById("hourlyRate").value);
+  function createRow(defaultCat = "선택형유료") {
+    const tr = document.createElement("tr");
 
-    const pensionRate = Number(document.getElementById("pensionRate").value || 0);
-    const healthRate = Number(document.getElementById("healthRate").value || 0);
-    const employmentRate = Number(document.getElementById("employmentRate").value || 0);
-    const industryRate = Number(document.getElementById("industryRate").value || 0);
-    const insuranceApply = document.getElementById("insuranceApply").value;
-    const insuranceAdjust = Number(document.getElementById("insuranceAdjust").value || 0);
+    const catTd = document.createElement("td");
+    const catSel = document.createElement("select");
+    catSel.className = "as-cat";
+    CATS.forEach(c => {
+      const o = document.createElement("option");
+      o.value = c.value;
+      o.textContent = c.label;
+      if (c.value === defaultCat) o.selected = true;
+      catSel.appendChild(o);
+    });
+    catTd.appendChild(catSel);
 
-    const studentCount = Number(document.getElementById("studentCount").value || 0);
-    const materialPerStudent = Number(document.getElementById("materialPerStudent").value || 0);
-    const operationRate = Number(document.getElementById("operationRate").value || 0);
+    const nameTd = document.createElement("td");
+    const nameInput = document.createElement("input");
+    nameInput.type = "text";
+    nameInput.className = "as-name";
+    nameInput.placeholder = "예: 피아노A, 영어B, 맞춤형 미술 등";
+    nameTd.appendChild(nameInput);
 
-    // 2. 기본 검증
-    const errors = [];
+    // 수강생 수
+    const stdTd = document.createElement("td");
+    const stdInput = document.createElement("input");
+    stdInput.type = "number";
+    stdInput.min = "0";
+    stdInput.step = "1";
+    stdInput.className = "as-students";
+    stdInput.placeholder = "인원";
+    stdTd.appendChild(stdInput);
 
-    if (!programType) errors.push("프로그램 구분을 선택해 주세요.");
-    if (!teacherType) errors.push("강사 유형을 선택해 주세요.");
+    // 연간 회기수(주차)
+    const sessionsTd = document.createElement("td");
+    const sessionsInput = document.createElement("input");
+    sessionsInput.type = "number";
+    sessionsInput.min = "0";
+    sessionsInput.step = "1";
+    sessionsInput.className = "as-sessions";
+    sessionsInput.placeholder = "회기수";
+    sessionsTd.appendChild(sessionsInput);
 
-    if (!monthStart || !monthEnd) {
-      errors.push("운영 시작월과 종료월을 모두 선택해 주세요.");
-    } else if (monthEnd < monthStart) {
-      errors.push("종료월이 시작월보다 빠를 수 없습니다.");
-    }
+    // 1회기 수업시간(시간)
+    const hoursTd = document.createElement("td");
+    const hoursInput = document.createElement("input");
+    hoursInput.type = "number";
+    hoursInput.min = "0";
+    hoursInput.step = "0.1";
+    hoursInput.className = "as-hours";
+    hoursInput.placeholder = "시간";
+    hoursTd.appendChild(hoursInput);
 
-    if (!weeksPerMonth || weeksPerMonth <= 0) {
-      errors.push("월 기준 운영 주차를 0보다 크게 입력해 주세요.");
-    }
+    // 강사 시급
+    const payTd = document.createElement("td");
+    const payInput = document.createElement("input");
+    payInput.type = "number";
+    payInput.min = "0";
+    payInput.step = "1000";
+    payInput.className = "as-hourly";
+    payInput.placeholder = "시급";
+    payTd.appendChild(payInput);
 
-    if (!sessionsPerWeek || sessionsPerWeek <= 0) {
-      errors.push("주당 회기 수를 0보다 크게 입력해 주세요.");
-    }
+    // 인건비 + 기관부담 합계
+    const wageTd = document.createElement("td");
+    wageTd.className = "as-wage";
+    wageTd.textContent = "-";
 
-    if (!hoursPerSession || hoursPerSession <= 0) {
-      errors.push("회당 시수를 0보다 크게 입력해 주세요.");
-    }
+    // 수강료 단가(1인/1회 또는 1인/월 등, 편의상 1인·1회 기준으로 입력)
+    const feeUnitTd = document.createElement("td");
+    const feeUnitInput = document.createElement("input");
+    feeUnitInput.type = "number";
+    feeUnitInput.min = "0";
+    feeUnitInput.step = "1000";
+    feeUnitInput.className = "as-fee-unit";
+    feeUnitInput.placeholder = "1인당 수강료 단가";
+    feeUnitTd.appendChild(feeUnitInput);
 
-    if (!hourlyRate || hourlyRate <= 0) {
-      errors.push("강사 시급(단가)을 0보다 크게 입력해 주세요.");
-    }
+    // 수강료 총액
+    const feeAmtTd = document.createElement("td");
+    feeAmtTd.className = "as-fee-amount";
+    feeAmtTd.textContent = "-";
 
-    if (errors.length > 0) {
-      resultBox.innerHTML = `
-        <div class="error">
-          <p><b>입력값을 다시 확인해 주세요.</b></p>
-          <ul>${errors.map(msg => `<li>${msg}</li>`).join("")}</ul>
-        </div>
-      `;
+    const noteTd = document.createElement("td");
+    const noteInput = document.createElement("input");
+    noteInput.type = "text";
+    noteInput.className = "as-note";
+    noteInput.placeholder = "비고";
+    noteTd.appendChild(noteInput);
+
+    const delTd = document.createElement("td");
+    const delBtn = document.createElement("button");
+    delBtn.type = "button";
+    delBtn.textContent = "X";
+    delBtn.className = "btn-ghost-small";
+    delTd.appendChild(delBtn);
+
+    tr.appendChild(catTd);
+    tr.appendChild(nameTd);
+    tr.appendChild(stdTd);
+    tr.appendChild(sessionsTd);
+    tr.appendChild(hoursTd);
+    tr.appendChild(payTd);
+    tr.appendChild(wageTd);
+    tr.appendChild(feeUnitTd);
+    tr.appendChild(feeAmtTd);
+    tr.appendChild(noteTd);
+    tr.appendChild(delTd);
+
+    [stdInput, sessionsInput, hoursInput, payInput, feeUnitInput].forEach(el =>
+      el.addEventListener("input", updateAll)
+    );
+    catSel.addEventListener("change", updateAll);
+    delBtn.addEventListener("click", () => {
+      tr.remove();
+      updateAll();
+    });
+
+    return tr;
+  }
+
+  function updateAll() {
+    const rows = tbody.querySelectorAll("tr");
+    const catSum = {};
+    const feeCatSum = {};
+    CATS.forEach(c => {
+      catSum[c.value] = 0;
+      feeCatSum[c.value] = 0;
+    });
+    let grandWage = 0;
+    let grandFee = 0;
+
+    const orgRate = getOrgRate() / 100; // %
+
+    rows.forEach(tr => {
+      const cat = tr.querySelector(".as-cat")?.value || "기타";
+      const students = Number(tr.querySelector(".as-students")?.value || 0);
+      const sessions = Number(tr.querySelector(".as-sessions")?.value || 0);
+      const hours = Number(tr.querySelector(".as-hours")?.value || 0);
+      const hourly = Number(tr.querySelector(".as-hourly")?.value || 0);
+      const feeUnit = Number(tr.querySelector(".as-fee-unit")?.value || 0);
+
+      const wageTd = tr.querySelector(".as-wage");
+      const feeAmtTd = tr.querySelector(".as-fee-amount");
+
+      // 강사 인건비 = 시급 × 시간 × 회기수
+      let wageBase = 0;
+      if (hourly > 0 && hours > 0 && sessions > 0) {
+        wageBase = hourly * hours * sessions;
+      }
+
+      let wageTotal = wageBase;
+      if (wageBase > 0 && orgRate > 0) {
+        wageTotal = Math.round(wageBase * (1 + orgRate));
+      }
+
+      if (wageTotal > 0) {
+        wageTd.textContent = fmtMoney(wageTotal);
+        if (catSum[cat] == null) catSum[cat] = 0;
+        catSum[cat] += wageTotal;
+        grandWage += wageTotal;
+      } else {
+        wageTd.textContent = "-";
+      }
+
+      // 수강료 총액 = 수강생 수 × 회기수 × 1인당 단가
+      let feeTotal = 0;
+      if (students > 0 && sessions > 0 && feeUnit > 0) {
+        feeTotal = students * sessions * feeUnit;
+      }
+
+      if (feeTotal > 0) {
+        feeAmtTd.textContent = fmtMoney(feeTotal);
+        if (feeCatSum[cat] == null) feeCatSum[cat] = 0;
+        feeCatSum[cat] += feeTotal;
+        grandFee += feeTotal;
+      } else {
+        feeAmtTd.textContent = "-";
+      }
+    });
+
+    // 요약 박스: 인건비/수강료 둘 다 보여주자
+    const wageHtml = buildCategorySummaryHtml(CATS, catSum, grandWage, {
+      title: "카테고리별 강사 인건비(기관부담 포함)",
+      totalLabel: "강사 인건비 총액"
+    });
+
+    const feeLines = [];
+    feeLines.push("<p><b>카테고리별 수강료 총액</b></p>");
+    CATS.forEach(c => {
+      const sum = feeCatSum[c.value] || 0;
+      if (sum > 0) {
+        feeLines.push(`<p>· ${c.label}: <b>${fmtMoney(sum)}</b></p>`);
+      } else {
+        feeLines.push(`<p>· ${c.label}: 0원</p>`);
+      }
+    });
+    feeLines.push("<hr>");
+    feeLines.push(
+      `<p><b>수강료 총액 합계</b> = <b>${fmtMoney(grandFee)}</b></p>`
+    );
+
+    summaryBox.innerHTML = `
+      ${wageHtml}
+      <div style="margin-top:12px;"></div>
+      ${feeLines.join("")}
+    `;
+  }
+
+  function makeNote() {
+    const year = getYear();
+    const orgRate = getOrgRate();
+    const rows = tbody.querySelectorAll("tr");
+
+    const catWageSum = {};
+    const catFeeSum = {};
+    CATS.forEach(c => {
+      catWageSum[c.value] = 0;
+      catFeeSum[c.value] = 0;
+    });
+
+    let grandWage = 0;
+    let grandFee = 0;
+    const details = [];
+
+    rows.forEach(tr => {
+      const cat = tr.querySelector(".as-cat")?.value || "기타";
+      const name = (tr.querySelector(".as-name")?.value || "").trim();
+      const students = Number(tr.querySelector(".as-students")?.value || 0);
+      const sessions = Number(tr.querySelector(".as-sessions")?.value || 0);
+      const hours = Number(tr.querySelector(".as-hours")?.value || 0);
+      const hourly = Number(tr.querySelector(".as-hourly")?.value || 0);
+      const feeUnit = Number(tr.querySelector(".as-fee-unit")?.value || 0);
+      const note = (tr.querySelector(".as-note")?.value || "").trim();
+
+      if (!name || sessions <= 0) return;
+
+      let wageBase = 0;
+      if (hourly > 0 && hours > 0) {
+        wageBase = hourly * hours * sessions;
+      }
+      let wageTotal = wageBase;
+      if (wageBase > 0 && orgRate > 0) {
+        wageTotal = Math.round(wageBase * (1 + orgRate / 100));
+      }
+
+      let feeTotal = 0;
+      if (students > 0 && feeUnit > 0) {
+        feeTotal = students * sessions * feeUnit;
+      }
+
+      if (wageTotal <= 0 && feeTotal <= 0) return;
+
+      if (wageTotal > 0) {
+        if (catWageSum[cat] == null) catWageSum[cat] = 0;
+        catWageSum[cat] += wageTotal;
+        grandWage += wageTotal;
+      }
+      if (feeTotal > 0) {
+        if (catFeeSum[cat] == null) catFeeSum[cat] = 0;
+        catFeeSum[cat] += feeTotal;
+        grandFee += feeTotal;
+      }
+
+      const label = CATS.find(c => c.value === cat)?.label || cat;
+      const wageText =
+        wageTotal > 0
+          ? `강사 인건비: 시급 ${fmtMoney(hourly)} × ${hours}시간 × ${sessions}회기 × (기관부담 ${orgRate}% 포함) ≒ ${fmtMoney(
+              wageTotal
+            )}`
+          : "강사 인건비: -";
+
+      const feeText =
+        feeTotal > 0
+          ? `수강료: 수강생 ${students}명 × ${sessions}회기 × 1인당 ${fmtMoney(
+              feeUnit
+            )} = ${fmtMoney(feeTotal)}`
+          : "수강료: -";
+
+      details.push({
+        label,
+        name,
+        wageText,
+        feeText,
+        note
+      });
+    });
+
+    if (details.length === 0) {
+      noteBox.innerHTML = `<p class="muted">입력된 강좌가 없어 설명문을 생성할 수 없습니다.</p>`;
       return;
     }
 
-    // 3. 운영 개월 수
-    const monthCount = (monthEnd - monthStart) + 1;
+    const catLines = [];
+    CATS.forEach(c => {
+      const w = catWageSum[c.value] || 0;
+      const f = catFeeSum[c.value] || 0;
+      catLines.push(
+        `· ${c.label}: 강사 인건비 ${fmtMoney(w)}, 수강료 ${fmtMoney(f)}`
+      );
+    });
 
-    // 4. 총 회기 / 총 시수 계산
-    //    총 회기 = 월수 × 주차 × 주당 회기수
-    const totalSessions = monthCount * weeksPerMonth * sessionsPerWeek;
-    const totalHours = totalSessions * hoursPerSession;
+    const detailLines = details.map(d => {
+      const notePart = d.note ? `<br>  - 비고: ${d.note}` : "";
+      return `<p>- [${d.label}] ${d.name}<br>  - ${d.wageText}<br>  - ${d.feeText}${notePart}</p>`;
+    });
 
-    // 5. 강사료 총액
-    const teacherCost = totalHours * hourlyRate;
-
-    // 6. 사회보험 요율 합산
-    let totalRate = pensionRate + healthRate + employmentRate + industryRate;
-
-    // 적용 범위에 따라 요율 보정
-    if (insuranceApply === "none") {
-      totalRate = 0;
-    } else if (insuranceApply === "partial") {
-      // 초단시간 등 부분 적용인 경우 대략 절반만 적용하는 식으로 단순화
-      // 실제 업무에서는 여기서 직종·시간수 기준 세부 로직으로 확장 예정
-      totalRate = totalRate * 0.5;
-    }
-
-    // 보험료 = 강사료 × (요율 합산 / 100)
-    let insuranceCost = teacherCost * (totalRate / 100);
-    insuranceCost += insuranceAdjust; // 보정값 반영
-
-    // 7. 재료비
-    // 재료비 = 학생 수 × 1인당 재료비
-    const materialCost = studentCount > 0 && materialPerStudent > 0
-      ? studentCount * materialPerStudent
-      : 0;
-
-    // 8. 운영비
-    // 운영비 = 강사료 × (운영비 비율 / 100)
-    const operationCost = operationRate > 0
-      ? teacherCost * (operationRate / 100)
-      : 0;
-
-    // 9. 총액
-    const totalCost = teacherCost + insuranceCost + materialCost + operationCost;
-
-    // 10. 설명용 텍스트 구성
-    const programLabelMap = {
-      "select-paid": "선택형 교육(유료 방과후)",
-      "select-free": "선택형 교육(무료 방과후)",
-      "custom-edu": "맞춤형 교육 프로그램",
-      "select-care": "선택형 돌봄 프로그램"
-    };
-
-    const teacherLabelMap = {
-      "custom": "맞춤형 강사",
-      "select-paid": "선택형 유료 강사",
-      "select-free": "선택형 무료 강사"
-    };
-
-    const programLabel = programLabelMap[programType] || programType;
-    const teacherLabel = teacherLabelMap[teacherType] || teacherType;
-
-    const lines = [];
-
-    lines.push(`<b>① 기본 정보</b>`);
-    lines.push(`· 프로그램 유형: ${programLabel}`);
-    lines.push(`· 강사 유형: ${teacherLabel}`);
-    lines.push(`· 운영 기간: ${monthStart}월 ~ ${monthEnd}월 (총 ${monthCount}개월, 월 ${weeksPerMonth}주 기준)`);
-
-    lines.push(`<br><b>② 강사료 산출</b>`);
-    lines.push(`· 총 회기수 = ${monthCount}개월 × ${weeksPerMonth}주 × 주 ${sessionsPerWeek}회 = <b>${totalSessions.toFixed(1)}회</b>`);
-    lines.push(`· 총 시수 = 총 회기수 × 회당 ${hoursPerSession}시간 = <b>${totalHours.toFixed(1)}시간</b>`);
-    lines.push(`· 강사료 = 총 시수 × 시급 ${fmtMoney(hourlyRate)} = <b>${fmtMoney(teacherCost)}</b>`);
-
-    lines.push(`<br><b>③ 사회보험 기관부담금</b>`);
-    if (insuranceApply === "none") {
-      lines.push(`· 사회보험 미적용으로 산정하지 않음.`);
-    } else {
-      lines.push(`· 적용 요율(대략) = ${fmtPercent(totalRate)} (보정 전)`);
-      if (insuranceAdjust !== 0) {
-        lines.push(`· 보험료 보정: ${insuranceAdjust >= 0 ? "+" : ""}${fmtMoney(insuranceAdjust)}`);
-      }
-      lines.push(`· 사회보험 기관부담금(대략) = 강사료 × 요율 = <b>${fmtMoney(insuranceCost)}</b>`);
-    }
-
-    lines.push(`<br><b>④ 재료비 · 운영비</b>`);
-    if (materialCost > 0) {
-      lines.push(`· 재료비 = 학생 ${studentCount}명 × 1인당 ${fmtMoney(materialPerStudent)} = <b>${fmtMoney(materialCost)}</b>`);
-    } else {
-      lines.push(`· 재료비: 입력값 없음 또는 0원으로 간주.`);
-    }
-
-    if (operationCost > 0) {
-      lines.push(`· 운영비 = 강사료 × ${fmtPercent(operationRate)} = <b>${fmtMoney(operationCost)}</b>`);
-    } else {
-      lines.push(`· 운영비: 비율 0%로 산정(미편성).`);
-    }
-
-    lines.push(`<br><b>⑤ 총 소요 예산</b>`);
-    lines.push(`· 총액 = 강사료 + 사회보험 + 재료비 + 운영비`);
-    lines.push(`· 총액 = ${fmtMoney(teacherCost)} + ${fmtMoney(insuranceCost)} + ${fmtMoney(materialCost)} + ${fmtMoney(operationCost)}`);
-    lines.push(`<br><b>⇒ 최종 소요예산(편성 권장액): ${fmtMoney(totalCost)}</b>`);
-
-    resultBox.innerHTML = `
-      <div>
-        <p class="muted">아래 내용을 세출예산요구서 산출식란에 참고하여 기재하면 됩니다.</p>
-        <div class="calc-result">
-          ${lines.map(l => `<p>${l}</p>`).join("")}
-        </div>
+    const html = `
+      <p>
+        ${year || ""}학년도 늘봄교실 및 방과후학교 프로그램 운영을 위하여,
+        강사 인건비(기관부담 사회보험료 포함)와 수강료 산정 기준에 따라
+        강사 인건비 총 <b>${fmtMoney(
+          grandWage
+        )}</b>, 수강료 총 <b>${fmtMoney(grandFee)}</b>을 편성하고자 합니다.
+      </p>
+      <p>
+        카테고리별 인건비·수강료 소요액은 다음과 같습니다.<br>
+        ${catLines.join("<br>")}
+      </p>
+      <p>세부 산출 내역은 아래와 같으며, 필요 시 강좌별 내역서를 첨부합니다.</p>
+      <div style="margin-top:8px;">
+        ${detailLines.join("")}
       </div>
+      <p class="muted" style="margin-top:8px;">
+        ※ 실제 집행 시에는 강사 계약서 및 사회보험 요율, 수강료 징수계획을 다시 확인해야 합니다.
+      </p>
     `;
+
+    noteBox.innerHTML = html;
+  }
+
+  function initRows() {
+    tbody.innerHTML = "";
+    tbody.appendChild(createRow("선택형유료"));
+    tbody.appendChild(createRow("맞춤형교육"));
+    tbody.appendChild(createRow("선택형돌봄"));
+    updateAll();
+  }
+
+  addRowBtn?.addEventListener("click", () => {
+    tbody.appendChild(createRow());
+    updateAll();
   });
+
+  bindClearAll(clearRowsBtn, initRows, "모든 강좌를 삭제하시겠습니까?");
+  makeNoteBtn?.addEventListener("click", makeNote);
+
+  initRows();
 });
